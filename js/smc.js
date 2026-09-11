@@ -196,15 +196,28 @@ TL.smc = (function () {
     return out;
   }
 
+  /* A zone is "fresh" (unmitigated) when price has not RETURNED to it after
+   * fully leaving it. The impulsive departure bar usually still overlaps the
+   * zone, so a plain "any touch" scan would mark everything mitigated; we
+   * only count a re-entry that happens after a bar closes entirely outside
+   * the zone. The current (last) bar is excluded from the scan so a zone
+   * being tested right now still counts as fresh — that first touch is
+   * exactly what makes it tradable. */
   function markFresh(zones, bars) {
-    var last = bars[bars.length - 1].close;
+    var scanEnd = Math.max(0, bars.length - 1); // exclusive
     return zones.map(function (z) {
-      var revisited = false;
-      for (var i = z.baseI + 1; i < bars.length; i++) {
-        if (bars[i].high >= z.bottom && bars[i].low <= z.top) { revisited = true; break; }
+      var left = false;      // price fully departed the zone at some point
+      var revisited = false; // ...and later traded back into it
+      for (var i = z.baseI + 1; i < scanEnd; i++) {
+        var b = bars[i];
+        if (!left) {
+          if (b.low > z.top || b.high < z.bottom) left = true;
+        } else if (b.high >= z.bottom && b.low <= z.top) {
+          revisited = true;
+          break;
+        }
       }
-      var active = !revisited || last <= z.top || last >= z.bottom;
-      z.fresh = active;
+      z.fresh = !revisited;
       return z;
     });
   }

@@ -149,6 +149,8 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
 }
 #chart-canvas { display: block; cursor: crosshair; }
+#chart-canvas:focus { outline: none; }
+#chart-canvas:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
 #chart-tooltip {
   position: absolute; display: none; pointer-events: none; z-index: 10;

@@ -3,12 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
   <title>Techlysis — Multi-Asset Market Analysis</title>
   <meta name="description" content="Techlysis: multi-asset technical analysis workstation. OHLCV, indicators, SMC, volume profile, Fibonacci and a full trade plan — in pure HTML/CSS/JS.">
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
-  <!-- Supabase UMD (optional; guest mode works without it) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Supabase UMD (optional; guest mode works without it). Loaded async so a
+       slow/blocked CDN never delays first paint — the client retries until it
+       arrives (see js/supabase-client.js). -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
 </head>
 <body>
 
@@ -55,11 +58,12 @@
           <button class="btn tb" id="btn-fit" title="Fit all">Fit</button>
           <button class="btn tb" id="btn-11" title="Default view">1:1</button>
         </div>
-        <span class="tb-hint">drag · wheel · shift+wheel · dbl-click</span>
+        <span class="tb-hint">drag · wheel · shift+wheel · dbl-click · click chart then ←→/+/−/Home</span>
       </div>
 
       <div id="chart-container">
-        <canvas id="chart-canvas"></canvas>
+        <canvas id="chart-canvas" tabindex="0" role="img"
+                aria-label="Interactive price chart. Focus and use arrow keys to pan, plus and minus to zoom, Home to fit all."></canvas>
         <div id="chart-tooltip"></div>
       </div>
 

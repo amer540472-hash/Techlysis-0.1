@@ -32,11 +32,12 @@ TL.volumeProfile = (function () {
       var bar = bars[k];
       var vol = bar.volume || 0;
       if (vol <= 0) continue;
-      var range = (bar.high - bar.low) || 1;
-      var idx = Math.min(bins - 1, Math.max(0, Math.floor((bar.close - min) / step)));
-      // simple attribution: full volume to close's bin (close approximation)
-      var closeIdx = idx;
-      binVol[closeIdx] += vol;
+      // spread the bar's volume evenly across every bin its range covers
+      var loIdx = Math.min(bins - 1, Math.max(0, Math.floor((bar.low - min) / step)));
+      var hiIdx = Math.min(bins - 1, Math.max(0, Math.floor((bar.high - min) / step)));
+      var span = hiIdx - loIdx + 1;
+      var per = vol / span;
+      for (var bi = loIdx; bi <= hiIdx; bi++) binVol[bi] += per;
       totalVolume += vol;
     }
     if (totalVolume <= 0) {

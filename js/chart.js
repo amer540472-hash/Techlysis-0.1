@@ -144,6 +144,9 @@ TL.chart = (function () {
     state.legendEl = opts.legendEl;
     state.tooltipEl = opts.tooltipEl;
     state.ctx = state.canvas.getContext('2d');
+    // make the canvas focusable so the documented keyboard shortcuts
+    // (arrows / +− / Home) actually receive key events
+    if (!state.canvas.getAttribute('tabindex')) state.canvas.setAttribute('tabindex', '0');
     resize();
     bindEvents();
     window.addEventListener('resize', function () { resize(); requestDraw(); });
@@ -235,13 +238,14 @@ TL.chart = (function () {
     window.addEventListener('mousemove', function (e) {
       if (!state.container) return;
       var p = localPos(e);
-      state.mouse = p;
+      // only track the crosshair while the pointer is actually over the canvas
+      var inside = p.x >= 0 && p.y >= 0 && p.x <= state.width && p.y <= state.height;
+      state.mouse = inside ? p : null;
       if (state.dragging) {
         var w = state.width - LEFT_MARGIN - RIGHT_MARGIN;
         var pxPerBar = w / state.viewBars;
         state.viewStart = state.dragStartView - (p.x - state.dragStartX) / pxPerBar;
         clampView();
-        requestDraw();
       }
       requestDraw(); // crosshair redraw
     });
@@ -279,20 +283,19 @@ TL.chart = (function () {
     });
     c.addEventListener('pointermove', function (e) {
       if (!state.pointers[e.pointerId]) return;
-      var prev = state.pointers[e.pointerId];
       state.pointers[e.pointerId] = localPos(e);
       var ids = Object.keys(state.pointers);
-      if (ids.length === 2) {
+      if (ids.length >= 2) {
+        // pinch zoom: scale by how the distance between the two pointers changes
         var a = state.pointers[ids[0]], b = state.pointers[ids[1]];
-        var pa = state.pointers[ids[0]], pb = state.pointers[ids[1]];
-        // simple pinch: compare distance change is complex; use x-span for zoom
-        var dist0 = Math.abs(a.x - b.x) || 1;
-        var prevA = prev, prevB = null;
-        // approximate pinch via movement of second pointer
-        var spanPrev = state._lastSpan || dist0;
-        var span = dist0;
-        zoomAt(0.5, spanPrev / span < 1 ? (TL.store.get().tools.chart.zoomSpeed || 1.2) : 1 / (TL.store.get().tools.chart.zoomSpeed || 1.2));
-        state._lastSpan = span;
+        var dx = a.x - b.x, dy = a.y - b.y;
+        var dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        if (state._lastSpan) {
+          var w0 = state.width - LEFT_MARGIN - RIGHT_MARGIN;
+          var centerRatio = TL.utils.clamp(((a.x + b.x) / 2 - LEFT_MARGIN) / w0, 0, 1);
+          zoomAt(centerRatio, dist / state._lastSpan);
+        }
+        state._lastSpan = dist;
       } else if (ids.length === 1 && state.dragging) {
         var w = state.width - LEFT_MARGIN - RIGHT_MARGIN;
         var pxPerBar = w / state.viewBars;
@@ -354,7 +357,8 @@ TL.chart = (function () {
     var end = Math.min(state.bars.length, Math.ceil(state.viewStart + state.viewBars));
     var w = state.width - LEFT_MARGIN - RIGHT_MARGIN;
     var barW = w / state.viewBars;
-    var gap = TL.store.get().tools.chart.candleGap || 0.15;
+    var gapCfg = TL.store.get().tools.chart.candleGap;
+    var gap = (gapCfg == null || !isFinite(gapCfg)) ? 0.15 : TL.utils.clamp(gapCfg, 0, 0.5);
     var bodyW = Math.max(1, barW * (1 - gap));
 
     // background grids
@@ -637,7 +641,9 @@ TL.chart = (function () {
       ctx.font = '10px ui-monospace, monospace';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'bottom';
-      ctx.fillText((l.type === 'resistance' ? 'R' : 'S') + '(' + l.touches + ')', state.width - RIGHT_MARGIN - 4, y - 1);
+      // label by position vs current price: above = resistance, below = support
+      var isRes = state.analysis ? l.price > state.analysis.price : l.type === 'resistance';
+      ctx.fillText((isRes ? 'R' : 'S') + '(' + l.touches + ')', state.width - RIGHT_MARGIN - 4, y - 1);
     }
     ctx.setLineDash([]);
   }

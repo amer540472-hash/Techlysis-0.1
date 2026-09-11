@@ -11,6 +11,10 @@ window.TL = window.TL || {};
 TL.supabase = (function () {
   var client = null;
   var session = null;
+  var authListeners = [];      // survive lazy client creation (keys added later)
+  var subscribedClient = null; // which client the auth subscription is bound to
+  var loadRetries = 0;
+  var retryTimer = null;
 
   function configured() {
     return !!(TL.env.env.SUPABASE_URL && TL.env.env.SUPABASE_ANON_KEY);
@@ -21,22 +25,50 @@ TL.supabase = (function () {
   }
 
   function init() {
-    if (!configured() || !isLoaded()) { client = null; return null; }
+    if (!configured()) { client = null; subscribedClient = null; return null; }
+    if (!isLoaded()) {
+      // the CDN UMD bundle loads asynchronously (or may be blocked entirely);
+      // retry for a short while instead of giving up on first call
+      if (loadRetries++ < 30 && !retryTimer) {
+        retryTimer = setTimeout(function () { retryTimer = null; init(); }, 400);
+      }
+      return null;
+    }
+    loadRetries = 0;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     try {
+      if (client && client.removeAllChannels) {
+        try { client.removeAllChannels(); } catch (e) { /* ignore */ }
+      }
       client = window.supabase.createClient(TL.env.env.SUPABASE_URL, TL.env.env.SUPABASE_ANON_KEY, {
         auth: { persistSession: true, autoRefreshToken: true }
       });
+      subscribedClient = null;
+      subscribeAuth();
       restoreSession();
     } catch (e) {
       console.warn('Supabase init failed', e);
       client = null;
+      subscribedClient = null;
     }
     return client;
   }
 
   function getClient() {
-    if (!client && configured() && isLoaded()) init();
+    if (!client && configured()) init();
     return client;
+  }
+
+  function subscribeAuth() {
+    if (!client || subscribedClient === client) return;
+    subscribedClient = client;
+    client.auth.onAuthStateChange(function (event, s) {
+      session = s || null;
+      for (var i = 0; i < authListeners.length; i++) {
+        try { authListeners[i](session); } catch (e) { console.error(e); }
+      }
+      TL.events.emit('auth-changed', session);
+    });
   }
 
   function restoreSession() {
@@ -65,13 +97,25 @@ TL.supabase = (function () {
   function signUp(email, password) {
     var c = getClient();
     if (!c) return Promise.reject(new Error('Supabase is not configured.'));
-    return c.auth.signUp({ email: email, password: password });
+    return c.auth.signUp({ email: email, password: password }).then(function (res) {
+      // with email confirmation off, signUp returns a session directly
+      if (res && res.data && res.data.session) session = res.data.session;
+      return res;
+    });
   }
 
   function signIn(email, password) {
     var c = getClient();
     if (!c) return Promise.reject(new Error('Supabase is not configured.'));
-    return c.auth.signInWithPassword({ email: email, password: password });
+    return c.auth.signInWithPassword({ email: email, password: password }).then(function (res) {
+      // adopt the session immediately — the UI must not stay "guest" after a
+      // successful sign-in even if no auth subscription existed yet
+      if (res && res.data && res.data.session) {
+        session = res.data.session;
+        TL.events.emit('auth-changed', session);
+      }
+      return res;
+    });
   }
 
   function signOut() {
@@ -84,14 +128,9 @@ TL.supabase = (function () {
   }
 
   function onAuthChange(fn) {
-    var c = getClient();
-    if (c) {
-      c.auth.onAuthStateChange(function (event, s) {
-        session = s;
-        fn(s);
-        TL.events.emit('auth-changed', s);
-      });
-    }
+    authListeners.push(fn);
+    subscribeAuth(); // binds immediately if a client already exists,
+                     // otherwise on the next successful init()
   }
 
   /* ---------------- cloud sync ---------------- */

@@ -18,16 +18,17 @@ TL.data = (function () {
       try {
         target = TL.CORS_PROXIES[i](url);
       } catch (e) { continue; }
+      var ctrl = new AbortController();
+      var timer = setTimeout(function () { ctrl.abort(); }, 12000);
       try {
-        var ctrl = new AbortController();
-        var timer = setTimeout(function () { ctrl.abort(); }, 12000);
         var res = await fetch(target, { signal: ctrl.signal });
-        clearTimeout(timer);
         if (!res.ok) { lastErr = new Error('HTTP ' + res.status); continue; }
         return await res.text();
       } catch (e) {
         lastErr = e;
         continue;
+      } finally {
+        clearTimeout(timer); // never leave abort timers dangling on failures
       }
     }
     throw lastErr || new Error('Fetch failed: ' + url);
@@ -36,23 +37,52 @@ TL.data = (function () {
   /* ---------------- helpers ---------------- */
   function sortAsc(bars) { bars.sort(function (a, b) { return a.time - b.time; }); return bars; }
 
-  function resample(bars, factor) {
+  /* Aggregate `bars` by `factor`, aligned to epoch windows of the target
+   * timeframe so e.g. 4h bars start at 00/04/08/12/16/20 UTC regardless of
+   * where the source series begins. `stepMs` is the source bar duration. */
+  function resample(bars, factor, stepMs) {
     if (!factor || factor <= 1) return bars;
-    var out = [];
-    for (var i = 0; i < bars.length; i += factor) {
-      var chunk = bars.slice(i, i + factor);
-      if (!chunk.length) continue;
-      var o = chunk[0].open;
-      var c = chunk[chunk.length - 1].close;
-      var h = -Infinity, l = Infinity, v = 0;
-      for (var j = 0; j < chunk.length; j++) {
-        if (chunk[j].high > h) h = chunk[j].high;
-        if (chunk[j].low < l) l = chunk[j].low;
-        v += chunk[j].volume || 0;
+    if (!stepMs || !(stepMs > 0)) {
+      // unknown source step: fall back to fixed chunking anchored at the end
+      var out = [];
+      var offset = bars.length % factor;
+      if (offset > 0) {
+        out.push(mergeChunk(bars.slice(0, offset)));
       }
-      out.push({ time: chunk[0].time, open: o, high: h, low: l, close: c, volume: v });
+      for (var i = offset; i < bars.length; i += factor) {
+        out.push(mergeChunk(bars.slice(i, i + factor)));
+      }
+      return out.filter(Boolean);
     }
-    return out;
+    var win = factor * stepMs;
+    var res = [];
+    var cur = null, curKey = null;
+    for (var j = 0; j < bars.length; j++) {
+      var b = bars[j];
+      var key = Math.floor(b.time / win);
+      if (key !== curKey) {
+        cur = { time: key * win, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume || 0 };
+        res.push(cur);
+        curKey = key;
+      } else {
+        if (b.high > cur.high) cur.high = b.high;
+        if (b.low < cur.low) cur.low = b.low;
+        cur.close = b.close;
+        cur.volume += (b.volume || 0);
+      }
+    }
+    return res;
+  }
+
+  function mergeChunk(chunk) {
+    if (!chunk || !chunk.length) return null;
+    var h = -Infinity, l = Infinity, v = 0;
+    for (var j = 0; j < chunk.length; j++) {
+      if (chunk[j].high > h) h = chunk[j].high;
+      if (chunk[j].low < l) l = chunk[j].low;
+      v += chunk[j].volume || 0;
+    }
+    return { time: chunk[0].time, open: chunk[0].open, high: h, low: l, close: chunk[chunk.length - 1].close, volume: v };
   }
 
   function parseTwelveDate(dt) {
@@ -142,14 +172,31 @@ TL.data = (function () {
     if (!cfg.binance) throw new Error('No Binance symbol');
     var interval = TL.TIMEFRAMES[fetchTf].binance;
     if (!interval) throw new Error('Binance: unsupported interval ' + fetchTf);
-    var limit = Math.min(Math.max(need, 30), 1000);
-    var url = 'https://api.binance.com/api/v3/klines?symbol=' + cfg.binance + '&interval=' + interval + '&limit=' + limit;
-    var text = await fetchText(url);
-    var rows = JSON.parse(text);
-    if (!Array.isArray(rows) || !rows.length) throw new Error('Binance: empty');
-    var bars = rows.map(function (r) {
-      return { time: +r[0], open: +r[1], high: +r[2], low: +r[3], close: +r[4], volume: +r[5] };
-    });
+    // klines caps at 1000 rows/request — page backwards when more are needed
+    var target = Math.min(Math.max(need, 30), 3000);
+    var baseUrl = 'https://api.binance.com/api/v3/klines?symbol=' + cfg.binance + '&interval=' + interval;
+    var rows = [];
+    var endTime = null;
+    while (rows.length < target) {
+      var take = Math.min(1000, target - rows.length);
+      var url = baseUrl + '&limit=' + take + (endTime ? '&endTime=' + endTime : '');
+      var text = await fetchText(url);
+      var page = JSON.parse(text);
+      if (!Array.isArray(page) || !page.length) break;
+      rows = page.concat(rows);
+      if (page.length < take) break;           // no more history
+      endTime = page[0][0] - 1;                // next page ends before this one
+    }
+    if (!rows.length) throw new Error('Binance: empty');
+    // de-dupe by open time (safety for overlapping pages)
+    var seen = {};
+    var bars = [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (seen[r[0]]) continue;
+      seen[r[0]] = true;
+      bars.push({ time: +r[0], open: +r[1], high: +r[2], low: +r[3], close: +r[4], volume: +r[5] });
+    }
     sortAsc(bars);
     return { bars: bars, source: 'Binance', detail: 'Binance ' + cfg.binance + ' ' + interval };
   }
@@ -277,16 +324,20 @@ TL.data = (function () {
     if (!result) {
       result = synthetic(assetKey, tfKey, count);
     }
+    result.synthetic = (result.source === 'synthetic-demo');
 
-    if (agg && result.bars) {
-      result.bars = resample(result.bars, agg.factor);
+    // Aggregate only live base-timeframe data. The synthetic generator already
+    // produces bars at the TARGET timeframe, so resampling it would collapse
+    // bars twice (wrong count + wrong bar duration).
+    if (agg && result.bars && !result.synthetic) {
+      var baseStepMs = TL.TIMEFRAMES[agg.base].minutes * 60000;
+      result.bars = resample(result.bars, agg.factor, baseStepMs);
       result.detail = (result.detail || '') + ' → resampled ' + tfKey;
     }
 
     result.bars = result.bars.slice(-count);
     result.errors = errors;
     result.count = result.bars.length;
-    result.synthetic = (result.source === 'synthetic-demo');
     return result;
   }
 

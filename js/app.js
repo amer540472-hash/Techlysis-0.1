@@ -256,13 +256,25 @@ TL.app = (function () {
       TL.supabase.pullJournal().then(function (res) {
         if (res.data && res.data.length) {
           var local = TL.store.get().journal || [];
-          var merged = res.data.map(function (r) {
+          var cloud = res.data.map(function (r) {
             return {
               time: r.created_at, asset: r.asset, timeframe: r.timeframe,
               direction: r.direction, entry: r.entry_price, stop: r.stop_price,
               targets: r.targets, rr: r.rr, planText: r.plan_text, notes: r.notes
             };
-          }).concat(local);
+          });
+          // de-dupe by content (cloud created_at differs from the local save time)
+          var seen = {};
+          function keyOf(e) {
+            return [e.asset, e.timeframe, e.direction, Number(e.entry), Number(e.stop)].join('|');
+          }
+          var merged = [];
+          cloud.concat(local).forEach(function (e) {
+            var k = keyOf(e);
+            if (seen[k]) return;
+            seen[k] = true;
+            merged.push(e);
+          });
           TL.store.update({ journal: merged.slice(0, 200) });
           openJournal();
           toast('Journal pulled from cloud');
@@ -275,6 +287,7 @@ TL.app = (function () {
         TL.utils.copyToClipboard(TL.report.planText(currentAnalysis, currentTrade)).then(function () { toast('Plan text copied'); });
       }
       if (e.target && e.target.id === 'btn-save-journal') {
+        if (!currentTrade || !currentTrade.long || !currentTrade.short) { toast('Run an analysis first', 'warn'); return; }
         saveJournalEntry(currentTrade.long.rr >= currentTrade.short.rr ? 'long' : 'short');
       }
     });
@@ -348,7 +361,11 @@ TL.app = (function () {
   }
 
   /* ---------------- analysis pipeline ---------------- */
+  var analyzeSeq = 0; // guards against out-of-order results when the user
+                      // switches asset/timeframe while a fetch is in flight
+
   async function analyze() {
+    var seq = ++analyzeSeq;
     var s = TL.store.get();
     var asset = s.asset, tf = s.timeframe, count = s.barCount;
     setStatus('loading', 'Fetching ' + asset + ' ' + tf + '…');
@@ -357,10 +374,12 @@ TL.app = (function () {
     try {
       data = await TL.data.fetch(asset, tf, count);
     } catch (e) {
+      if (seq !== analyzeSeq) return;
       setStatus('error', 'Data error');
       toast('Data fetch failed: ' + (e.message || e));
       return;
     }
+    if (seq !== analyzeSeq) return; // a newer request superseded this one
 
     updateSourceBadge(data);
     if (data.synthetic) {
@@ -447,6 +466,7 @@ TL.app = (function () {
       analyze();
     });
     TL.events.on('tools-applied', function () {
+      syncUIFromSettings(); // keep header selects & toggles in sync after resets/edits
       if (currentData) analyze();
     });
     TL.events.on('keys-updated', updateEnvBadges);
@@ -454,6 +474,9 @@ TL.app = (function () {
 
     updateEnvBadges();
     setStatus('idle', 'Press Analyze');
+
+    var verEl = document.getElementById('footer-version');
+    if (verEl) verEl.textContent = TL.VERSION;
 
     analyze();
   }

@@ -53,7 +53,9 @@ TL.report = (function () {
       ['MACD hist', l.macdHist != null ? l.macdHist.toFixed(5) : '—'],
       ['ATR(14)', l.atr != null ? fp(l.atr, analysis.asset) : '—'],
       ['ADX(14)', l.adx != null ? l.adx.toFixed(1) : '—'],
-      ['Stoch K/D', l.stochK != null ? l.stochK.toFixed(1) + '/' + l.stochD.toFixed(1) : '—'],
+      ['Stoch K/D', l.stochK != null
+        ? l.stochK.toFixed(1) + '/' + (l.stochD != null ? l.stochD.toFixed(1) : '—')
+        : '—'],
       ['EMA21', l.ema21 != null ? fp(l.ema21, analysis.asset) : '—'],
       ['EMA50', l.ema50 != null ? fp(l.ema50, analysis.asset) : '—'],
       ['VWAP', l.vwap != null ? fp(l.vwap, analysis.asset) : '—'],

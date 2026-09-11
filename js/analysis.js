@@ -35,10 +35,11 @@ TL.analysis = (function () {
       levels.push({ price: pv.s3, label: 'Pivot S3', type: 'pivot' });
     }
 
-    // S/R clusters
+    // S/R clusters — classify by position relative to the current price
+    // (a cluster of swing highs below price now acts as support, and vice versa)
     for (var i = 0; i < smc.sr.length; i++) {
       var s = smc.sr[i];
-      levels.push({ price: s.price, label: (s.type === 'resistance' ? 'Resistance' : 'Support') + ' (' + s.touches + ' touches)', type: 'sr' });
+      levels.push({ price: s.price, label: (s.price > price ? 'Resistance' : 'Support') + ' (' + s.touches + ' touches)', type: 'sr' });
     }
 
     // supply/demand
@@ -77,10 +78,10 @@ TL.analysis = (function () {
     // fib
     if (fib) {
       for (var fr = 0; fr < fib.ret.length; fr++) {
-        levels.push({ price: fib.ret[fr].price, label: 'Fib ' + (fib.ret[fr].ratio * 100) + '%', type: 'fib' });
+        levels.push({ price: fib.ret[fr].price, label: 'Fib ' + (Math.round(fib.ret[fr].ratio * 1000) / 10) + '%', type: 'fib' });
       }
       for (var fe = 0; fe < fib.ext.length; fe++) {
-        levels.push({ price: fib.ext[fe].price, label: 'Fib ext ' + (fib.ext[fe].ratio * 100) + '%', type: 'fib' });
+        levels.push({ price: fib.ext[fe].price, label: 'Fib ext ' + (Math.round(fib.ext[fe].ratio * 1000) / 10) + '%', type: 'fib' });
       }
     }
 
@@ -132,7 +133,7 @@ TL.analysis = (function () {
 
     // EMA stack
     var ts = trendSignal(ind);
-    if (l.ema9 != null) {
+    if (l.ema9 != null && l.ema21 != null) {
       add('EMA9 vs EMA21 ' + (l.ema9 > l.ema21 ? 'bullish cross' : 'bearish cross'),
         l.ema9 > l.ema21 ? 1 : -1, 2);
     }

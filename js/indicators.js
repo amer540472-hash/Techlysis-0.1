@@ -47,12 +47,16 @@ TL.indicators = (function () {
       if (ch0 >= 0) gain += ch0; else loss -= ch0;
     }
     var avgGain = gain / period, avgLoss = loss / period;
-    out[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    function rsi(g, l) {
+      if (g === 0 && l === 0) return 50;      // perfectly flat market
+      return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+    }
+    out[period] = rsi(avgGain, avgLoss);
     for (var j = period + 1; j < closes.length; j++) {
       var ch = closes[j] - closes[j - 1];
       avgGain = (avgGain * (period - 1) + Math.max(ch, 0)) / period;
       avgLoss = (avgLoss * (period - 1) + Math.max(-ch, 0)) / period;
-      out[j] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+      out[j] = rsi(avgGain, avgLoss);
     }
     return out;
   }
@@ -65,16 +69,15 @@ TL.indicators = (function () {
     for (var i = 0; i < closes.length; i++) {
       if (ef[i] != null && es[i] != null) macd[i] = ef[i] - es[i];
     }
-    var sig = emaArr(macd.map(function (v) { return v == null ? 0 : v; }), signal);
-    // recompute signal only where macd defined
+    // signal line = EMA of macd, seeded at the first defined macd value
     var firstIdx = macd.findIndex(function (v) { return v != null; });
     var sigArr = nz(closes.length, null);
     var hist = nz(closes.length, null);
     if (firstIdx >= 0) {
       var k = 2 / (signal + 1);
       var seed = 0, n = 0;
-      for (var a = firstIdx; a < firstIdx + signal; a++) { seed += macd[a] || 0; n++; }
-      var prev = seed / n;
+      for (var a = firstIdx; a < firstIdx + signal && a < closes.length; a++) { seed += macd[a] || 0; n++; }
+      var prev = n ? seed / n : 0;
       for (var b = firstIdx; b < closes.length; b++) {
         if (b === firstIdx + signal - 1) sigArr[b] = prev;
         else if (b >= firstIdx + signal) {
@@ -257,44 +260,51 @@ TL.indicators = (function () {
     var highs = bars.map(function (b) { return b.high; });
     var lows = bars.map(function (b) { return b.low; });
 
+    var ema9 = emaArr(closes, 9);
+    var ema21 = emaArr(closes, 21);
+    var ema50 = emaArr(closes, 50);
+    var ema200 = emaArr(closes, 200);
+    var sma20 = smaArr(closes, 20);
     var bb = bollingerArr(closes, t.bb.period, t.bb.mult);
+    var vwap = vwapArr(bars);
+    var rsi = rsiArr(closes, t.rsi.period);
     var macd = macdArr(closes, 12, 26, 9);
     var stoch = stochArr(highs, lows, closes, 14, 3);
     var adx = adxArr(highs, lows, closes, 14);
-    var rsi = rsiArr(closes, t.rsi.period);
+    var atr = atrArr(highs, lows, closes, 14);
 
     return {
-      ema9: emaArr(closes, 9),
-      ema21: emaArr(closes, 21),
-      ema50: emaArr(closes, 50),
-      ema200: emaArr(closes, 200),
-      sma20: smaArr(closes, 20),
+      ema9: ema9,
+      ema21: ema21,
+      ema50: ema50,
+      ema200: ema200,
+      sma20: sma20,
       bb: bb,
-      vwap: vwapArr(bars),
+      vwap: vwap,
       rsi: rsi,
       macd: macd,
       stoch: stoch,
       adx: adx,
-      atr: atrArr(highs, lows, closes, 14),
+      atr: atr,
       pivots: classicPivots(bars),
       last: {
         rsi: last(rsi),
-        atr: last(atrArr(highs, lows, closes, 14)),
+        atr: last(atr),
         adx: last(adx.adx),
         macd: last(macd.macd),
         macdSignal: last(macd.signal),
         macdHist: last(macd.hist),
         stochK: last(stoch.k),
         stochD: last(stoch.d),
-        ema9: last(emaArr(closes, 9)),
-        ema21: last(emaArr(closes, 21)),
-        ema50: last(emaArr(closes, 50)),
-        ema200: last(emaArr(closes, 200)),
-        sma20: last(smaArr(closes, 20)),
+        ema9: last(ema9),
+        ema21: last(ema21),
+        ema50: last(ema50),
+        ema200: last(ema200),
+        sma20: last(sma20),
         bbUpper: last(bb.upper),
         bbMiddle: last(bb.middle),
         bbLower: last(bb.lower),
-        vwap: last(vwapArr(bars))
+        vwap: last(vwap)
       }
     };
   }

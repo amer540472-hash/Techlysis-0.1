@@ -62,6 +62,20 @@ python3 -m http.server 8000
 The app runs fine from `file://`; a local server is only recommended because a
 few data sources behave better over `http://`.
 
+### Smoke test (optional, zero dependencies)
+
+A headless test harness exercises the full pipeline in Node (data cascade →
+indicators → SMC → trade plans → report rendering → chart draw paths, plus
+unit checks for resampling and zone-mitigation semantics):
+
+```bash
+node tools/smoke-test.cjs            # exit code 0 = all checks passed
+SMOKE_VERBOSE=1 node tools/smoke-test.cjs   # with per-stage timing
+```
+
+It stubs the network as offline, so it also proves the synthetic-demo
+fallback path works end to end.
+
 ---
 
 ## GitHub Pages
@@ -122,6 +136,7 @@ Techlysis/
 │   └── app.js             orchestrator
 ├── supabase/schema.sql
 ├── SUPABASE_SCHEMA.sql    duplicate at root (easy to find)
+├── tools/smoke-test.cjs   headless end-to-end smoke test (node, no deps)
 ├── SETUP_KEYS.md
 ├── .env.example
 ├── .gitignore

@@ -313,6 +313,14 @@ TL.trade = (function () {
     var entry = (tools.trade && tools.trade.riskFill === 'limit' && limitEntry != null) ? limitEntry : price;
     var entryType = (entry === price) ? 'market' : 'limit';
 
+    // Guarantee the stop stays a sane distance from the ACTUAL entry: a limit
+    // entry can sit on the wrong side of a swing-based stop (e.g. a demand
+    // bottom below the long SL), which would produce a negative-risk plan.
+    var minDist = atr * slMult;
+    if (!(minDist > 0)) minDist = Math.max(Math.abs(entry) * 0.001, 1e-9);
+    if (dir === 'long') sl = Math.min(sl, entry - minDist);
+    else sl = Math.max(sl, entry + minDist);
+
     var riskPer = Math.abs(entry - sl);
     var tps = [];
     for (var t = 0; t < rrList.length; t++) {
@@ -365,7 +373,7 @@ TL.trade = (function () {
 
   function humanChecklist() {
     return [
-      'Inviolation (stop) is defined BEFORE entry and placed at structure + ATR buffer.',
+      'Invalidation (stop) is defined BEFORE entry and placed at structure + ATR buffer.',
       'No high-impact news in the next 30–60 minutes for this asset.',
       'Risk per trade is within the plan (default 1% of account).',
       'Reward-to-risk on TP1 is at least 2:1.',
@@ -379,8 +387,8 @@ TL.trade = (function () {
   /* ---------------- decision banner ---------------- */
   function decision(analysis, longPlan, shortPlan) {
     var score = analysis.bias.score;
-    var longRR = longPlan && longPlan.rr;
-    var shortRR = shortPlan && shortPlan.rr;
+    var longRR = (longPlan && longPlan.rr) || 0;
+    var shortRR = (shortPlan && shortPlan.rr) || 0;
     if (score >= 30 && longRR >= 1.8) return { banner: 'CONSIDER LONG', tone: 'bull', reason: 'Bullish bias (' + score + ') with R:R ' + longRR.toFixed(1) + ' on the long plan.' };
     if (score <= -30 && shortRR >= 1.8) return { banner: 'CONSIDER SHORT', tone: 'bear', reason: 'Bearish bias (' + score + ') with R:R ' + shortRR.toFixed(1) + ' on the short plan.' };
     if (Math.abs(score) < 30) return { banner: 'WAIT', tone: 'neutral', reason: 'Bias is weak (' + score + '). Wait for stronger structure or a cleaner level.' };
