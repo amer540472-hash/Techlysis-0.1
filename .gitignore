@@ -1,0 +1,16 @@
+# Environment / secrets — never commit real keys
+.env
+.env.*
+!.env.example
+
+# Editor & OS noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Dependencies / build output (none required, but keep it tidy)
+node_modules/
+dist/
+build/
